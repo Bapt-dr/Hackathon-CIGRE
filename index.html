@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Batterie 2h — impact d'un parc français</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0a0a; --panel: #111; --border: #222; --text: #ddd; --muted: #777;
+    --accent: #00d4aa; --kpi: #0d0d0d; --pos: #2ecc71; --neg: #e74c3c;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  body.light {
+    --bg: #ffffff; --panel: #f5f6f7; --border: #d9dde2; --text: #222; --muted: #666;
+    --accent: #008f73; --kpi: #ffffff; --pos: #1e8449; --neg: #c0392b;
+  }
+  body { margin: 0; background: var(--bg); color: var(--text); min-height: 100vh;
+         font-family: Consolas, "Courier New", monospace; padding: 24px; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 12px; }
+  h1 { color: var(--accent); letter-spacing: 3px; font-size: 26px; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; margin: 6px 0 20px; }
+  select { background: var(--panel); color: var(--text); border: 1px solid var(--border);
+           padding: 8px 10px; font-family: inherit; border-radius: 4px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
+           padding: 18px; margin-bottom: 20px; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; }
+  label { color: var(--muted); font-size: 12px; display: flex; justify-content: space-between; }
+  label b { color: var(--accent); font-size: 16px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); margin-top: 8px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+  .kpi { background: var(--kpi); border: 1px solid var(--border); border-radius: 5px; padding: 14px; }
+  .kpi .t { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+  .kpi .v { color: var(--accent); font-size: 22px; margin-top: 6px; }
+  .kpi .s { color: var(--muted); font-size: 11px; margin-top: 4px; }
+  .neg { color: var(--neg) !important; } .pos { color: var(--pos) !important; }
+  .chart-box { position: relative; height: 340px; }
+  .info { color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .info code { color: var(--text); }
+  h2 { color: var(--accent); font-size: 15px; margin: 0 0 12px; letter-spacing: 1px; }
+  .eq { color: var(--text); font-size: 13px; margin: 0 0 12px; }
+  @media (max-width: 600px) { body { padding: 14px; } .chart-box { height: 280px; } }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div>
+    <h1>BATTERIE 2H — IMPACT D'UN PARC FRANÇAIS</h1>
+    <p class="sub">Données horaires du 6 avril 2025 · Prix spot · Modèle prix = a·(solaire+éolien) + b</p>
+  </div>
+  <select id="theme" aria-label="Thème">
+    <option value="dark">Fond noir</option>
+    <option value="light">Fond blanc</option>
+  </select>
+</div>
+
+<div class="panel">
+  <div class="controls">
+    <div>
+      <label>Parc français (puissance, 2h) <b id="frVal"></b></label>
+      <input type="range" id="fr" min="0" max="3" step="0.1" value="1.3">
+    </div>
+    <div>
+      <label>Batterie étudiée (puissance, 2h) <b id="batVal"></b></label>
+      <input type="range" id="bat" min="50" max="500" step="10" value="200">
+    </div>
+    <div>
+      <label>Rendement aller-retour <b id="effVal"></b></label>
+      <input type="range" id="eff" min="70" max="100" step="1" value="85">
+    </div>
+    <div>
+      <label>Stratégie batterie étudiée</label>
+      <select id="strat" style="width:100%; margin-top:8px;">
+        <option value="fixed">Charge fixe 20h–21h (quel que soit le prix)</option>
+        <option value="opt">Optimisée (charge au prix min, décharge au prix max)</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="kpis">
+    <div class="kpi"><div class="t">Revenu batterie (sans parc FR)</div>
+      <div class="v" id="rev0"></div><div class="s">€ / jour</div></div>
+    <div class="kpi"><div class="t">Revenu batterie (avec parc FR)</div>
+      <div class="v" id="rev1"></div><div class="s">€ / jour</div></div>
+    <div class="kpi"><div class="t">Impact sur la batterie</div>
+      <div class="v" id="dRev"></div><div class="s" id="dRevPct"></div></div>
+    <div class="kpi"><div class="t">Revenu du parc FR</div>
+      <div class="v" id="revFr"></div><div class="s">€ / jour</div></div>
+    <div class="kpi"><div class="t">Hausse max du prix</div>
+      <div class="v" id="dPrixMax"></div><div class="s">€/MWh (heure de charge)</div></div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>PRIX SPOT : RÉEL vs APRÈS PARC FR</h2>
+  <div class="chart-box"><canvas id="cPrix"></canvas></div>
+</div>
+
+<div class="panel">
+  <h2>DISPATCH (MW) — + charge / − décharge</h2>
+  <div class="chart-box"><canvas id="cDispatch"></canvas></div>
+  <p class="info" id="planText"></p>
+</div>
+
+<div class="panel">
+  <h2>RÉGRESSION : PRIX NÉGATIFS vs SOLAIRE + ÉOLIEN</h2>
+  <p class="eq" id="regEq"></p>
+  <div class="chart-box"><canvas id="cReg"></canvas></div>
+  <p class="info">Régression calculée sur les heures à prix négatif uniquement. Le coefficient a sert à estimer l'impact du parc FR sur le prix.</p>
+</div>
+
+<div class="panel info">
+  <h2>MÉTHODE</h2>
+  Stratégie « charge fixe » : la batterie étudiée charge 1 h à pleine puissance de 20h à 21h, quel que soit le prix,
+  et restitue toute l'énergie stockée sur les 2 heures les plus chères après 20h.
+  Stratégie « optimisée » : l'algorithme choisit jusqu'à 2 heures de charge et jusqu'à 2 heures de décharge
+  (1 h chacune, à pleine puissance) qui maximisent le revenu, en respectant
+  l'état de charge (on ne décharge pas plus que ce qui a été stocké).
+  Le rendement aller-retour est appliqué à la charge : pour 1 MWh soutiré, η·1 MWh est stocké.
+  Le parc FR agit comme un preneur de prix sur les prix réels, puis son impact sur le prix est
+  <code>Δprix = −a × puissance</code>, où <code>a</code> est la pente de la régression
+  prix = a·(solaire+éolien)+b calculée sur les heures à prix négatif.
+  La batterie étudiée est redispatchée sur les prix résultant de l'impact du parc FR.
+  Pas de dégradation ni de coûts fixes dans ce modèle.
+</div>
+
+<script>
+const RAW = [{"h": 0, "prix": 70.45, "solaire": 2.0, "eolien": 9066.0, "conso": 43306.0, "nuc": 36936.0}, {"h": 1, "prix": 46.21, "solaire": 2.0, "eolien": 9060.0, "conso": 40128.0, "nuc": 35434.0}, {"h": 2, "prix": 35.01, "solaire": 2.0, "eolien": 9045.0, "conso": 38816.0, "nuc": 34860.0}, {"h": 3, "prix": 27.01, "solaire": 0.0, "eolien": 9047.0, "conso": 36650.0, "nuc": 33947.0}, {"h": 4, "prix": 25.5, "solaire": 0.0, "eolien": 9126.0, "conso": 34909.0, "nuc": 33093.0}, {"h": 5, "prix": 25.57, "solaire": 0.0, "eolien": 8887.0, "conso": 34407.0, "nuc": 33108.0}, {"h": 6, "prix": 26.51, "solaire": 0.0, "eolien": 8597.0, "conso": 35186.0, "nuc": 33567.0}, {"h": 7, "prix": 28.87, "solaire": 22.0, "eolien": 9049.0, "conso": 36176.0, "nuc": 33632.0}, {"h": 8, "prix": 26.25, "solaire": 1053.0, "eolien": 9482.0, "conso": 37408.0, "nuc": 33172.0}, {"h": 9, "prix": 0.1, "solaire": 4841.0, "eolien": 8505.0, "conso": 39907.0, "nuc": 32697.0}, {"h": 10, "prix": -2.0, "solaire": 8026.0, "eolien": 5773.0, "conso": 41754.0, "nuc": 31380.0}, {"h": 11, "prix": -27.49, "solaire": 10696.0, "eolien": 4138.0, "conso": 42819.0, "nuc": 29923.0}, {"h": 12, "prix": -59.82, "solaire": 13224.0, "eolien": 3900.0, "conso": 44412.0, "nuc": 27783.0}, {"h": 13, "prix": -106.48, "solaire": 14605.0, "eolien": 4377.0, "conso": 45080.0, "nuc": 26919.0}, {"h": 14, "prix": -115.46, "solaire": 14822.0, "eolien": 3894.0, "conso": 42190.0, "nuc": 26732.0}, {"h": 15, "prix": -70.55, "solaire": 14362.0, "eolien": 3800.0, "conso": 40094.0, "nuc": 26964.0}, {"h": 16, "prix": -19.15, "solaire": 13071.0, "eolien": 4096.0, "conso": 38330.0, "nuc": 27640.0}, {"h": 17, "prix": -0.01, "solaire": 10472.0, "eolien": 4063.0, "conso": 37408.0, "nuc": 30185.0}, {"h": 18, "prix": 17.62, "solaire": 7690.0, "eolien": 5513.0, "conso": 38608.0, "nuc": 32651.0}, {"h": 19, "prix": 50.94, "solaire": 3924.0, "eolien": 7687.0, "conso": 41357.0, "nuc": 34992.0}, {"h": 20, "prix": 75.0, "solaire": 608.0, "eolien": 7887.0, "conso": 42988.0, "nuc": 37208.0}, {"h": 21, "prix": 80.0, "solaire": 8.0, "eolien": 9497.0, "conso": 43798.0, "nuc": 37906.0}, {"h": 22, "prix": 70.01, "solaire": 4.0, "eolien": 10185.0, "conso": 43352.0, "nuc": 38034.0}, {"h": 23, "prix": 66.38, "solaire": 2.0, "eolien": 9812.0, "conso": 44578.0, "nuc": 38583.0}];
+
+// ---------- Régression prix = a·(solaire+éolien) + b (heures à prix négatif) ----------
+function fitLine(xs, ys) {
+  const n = xs.length;
+  if (n < 2) return { a: 0, b: 0, r2: 0 };
+  const mx = xs.reduce((s, v) => s + v, 0) / n;
+  const my = ys.reduce((s, v) => s + v, 0) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (xs[i] - mx) * (ys[i] - my);
+    sxx += (xs[i] - mx) ** 2;
+    syy += (ys[i] - my) ** 2;
+  }
+  const a = sxx === 0 ? 0 : sxy / sxx;
+  const r2 = (sxx === 0 || syy === 0) ? 0 : (sxy * sxy) / (sxx * syy);
+  return { a, b: my - a * mx, r2 };
+}
+const neg = RAW.filter(r => r.prix < 0);
+const REG = fitLine(neg.map(r => r.solaire + r.eolien), neg.map(r => r.prix));
+const A = REG.a;
+
+// ---------- Dispatch optimal ----------
+// Charge : jusqu'à 2 heures à pleine puissance P (soutirage réseau P, stockage η·P)
+// Décharge : jusqu'à 2 heures, injection répartie pour restituer toute l'énergie stockée
+// Contrainte : l'état de charge reste entre 0 et 2P à chaque heure.
+function allSets(n) {
+  const s = [];
+  for (let i = 0; i < n; i++) { s.push([i]); for (let j = i + 1; j < n; j++) s.push([i, j]); }
+  return s;
+}
+const SETS = allSets(24);
+
+function bestDispatch(prices, P, eta) {
+  const n = prices.length;
+  const profile = new Array(n).fill(0);
+  if (P <= 0) return { profile, rev: 0, charge: [], discharge: [] };
+  // Énergie restituée = η × énergie soutirée ; répartie à parts égales sur les heures de décharge,
+  // sans dépasser P par heure.
+  let best = { c: [], d: [], per: 0 }, bestRev = 0;
+  for (const c of SETS) {
+    const cCost = P * c.reduce((s, h) => s + prices[h], 0);
+    for (const d of SETS) {
+      if (d.some(h => c.includes(h))) continue;
+      const per = eta * c.length * P / d.length;   // MW restitués par heure de décharge
+      if (per > P + 1e-9) continue;
+      const rev = per * d.reduce((s, h) => s + prices[h], 0) - cCost;
+      if (rev <= bestRev) continue;
+      let soc = 0, ok = true;
+      for (let h = 0; h < n; h++) {
+        if (c.includes(h)) soc += eta * P;
+        if (d.includes(h)) soc -= per;
+        if (soc < -1e-9 || soc > 2 * P + 1e-9) { ok = false; break; }
+      }
+      if (!ok) continue;
+      bestRev = rev; best = { c, d, per };
+    }
+  }
+  best.c.forEach(h => profile[h] = P);
+  best.d.forEach(h => profile[h] = -best.per);
+  return { profile, rev: bestRev, charge: best.c, discharge: best.d };
+}
+
+// Stratégie à charge fixe : charge P pendant 1 h à 20h (quel que soit le prix),
+// puis restitue η·P, réparti sur les 2 heures les plus chères après 20h.
+function fixedDispatch(prices, P, eta, chargeHour = 20) {
+  const n = prices.length;
+  const profile = new Array(n).fill(0);
+  if (P <= 0) return { profile, rev: 0, charge: [], discharge: [] };
+  profile[chargeHour] = P;
+  const after = [];
+  for (let h = chargeHour + 1; h < n; h++) after.push(h);
+  after.sort((a, b) => prices[b] - prices[a]);
+  const dis = after.slice(0, 2).sort((a, b) => a - b);
+  dis.forEach(h => profile[h] = -(eta * P) / dis.length);
+  return { profile, rev: revenue(prices, profile), charge: [chargeHour], discharge: dis };
+}
+
+// Revenu (€) d'un profil de puissance sur des prix horaires (pas 1 h)
+function revenue(prices, profile) {
+  let r = 0;
+  for (let h = 0; h < prices.length; h++) r -= prices[h] * profile[h];
+  return r;
+}
+
+const fmtEur = v => Math.round(v).toLocaleString("fr-FR") + " €";
+const hours = RAW.map(r => r.h + "h");
+const basePrix = RAW.map(r => r.prix);
+
+// ---------- Thème ----------
+const THEMES = {
+  dark:  { text: "#aaaaaa", grid: "#1a1a1a" },
+  light: { text: "#333333", grid: "#e3e3e3" },
+};
+let currentTheme = "dark";
+function applyTheme(t) {
+  currentTheme = t;
+  document.body.classList.toggle("light", t === "light");
+  const c = THEMES[t];
+  [cPrix, cDispatch, cReg].forEach(ch => {
+    const o = ch.options;
+    o.plugins.legend.labels.color = c.text;
+    Object.values(o.scales).forEach(s => {
+      s.ticks.color = c.text;
+      s.grid.color = c.grid;
+      if (s.title) s.title.color = c.text;
+    });
+    ch.update();
+  });
+}
+
+// ---------- Graphiques ----------
+const axisOpts = (xTitle, yTitle) => ({
+  x: { ticks: { color: THEMES.dark.text }, grid: { color: THEMES.dark.grid },
+       title: { display: !!xTitle, text: xTitle || "", color: THEMES.dark.text } },
+  y: { ticks: { color: THEMES.dark.text }, grid: { color: THEMES.dark.grid },
+       title: { display: !!yTitle, text: yTitle || "", color: THEMES.dark.text } },
+});
+const legendOpts = { labels: { color: THEMES.dark.text } };
+
+const cPrix = new Chart(document.getElementById("cPrix"), {
+  type: "line",
+  data: { labels: hours, datasets: [
+    { label: "Prix réel (€/MWh)", data: basePrix, borderColor: "#1f8bd6",
+      backgroundColor: "#1f8bd6", tension: 0.2, pointRadius: 3 },
+    { label: "Prix après parc FR (€/MWh)", data: basePrix, borderColor: "#e8731c",
+      backgroundColor: "#e8731c", borderDash: [6, 4], tension: 0.2, pointRadius: 3 },
+  ]},
+  options: { responsive: true, maintainAspectRatio: false,
+    plugins: { legend: legendOpts }, scales: axisOpts("", "€/MWh") },
+});
+
+const cDispatch = new Chart(document.getElementById("cDispatch"), {
+  type: "bar",
+  data: { labels: hours, datasets: [
+    { label: "Parc FR (MW)", data: [], backgroundColor: "#e8731c" },
+    { label: "Batterie étudiée (MW)", data: [], backgroundColor: "#2ecc71" },
+  ]},
+  options: { responsive: true, maintainAspectRatio: false,
+    plugins: { legend: legendOpts }, scales: axisOpts("", "MW") },
+});
+
+// Régression : points des heures à prix négatif + droite ajustée
+const regPts = neg.map(r => ({ x: r.solaire + r.eolien, y: r.prix, h: r.h }));
+const xMin = regPts.length ? Math.min(...regPts.map(p => p.x)) : 0;
+const xMax = regPts.length ? Math.max(...regPts.map(p => p.x)) : 1;
+const cReg = new Chart(document.getElementById("cReg"), {
+  type: "scatter",
+  data: { datasets: [
+    { label: "Heures à prix négatif", data: regPts,
+      backgroundColor: "#1f8bd6", pointRadius: 6 },
+    { label: "Régression linéaire", type: "line", showLine: true,
+      data: [{ x: xMin, y: REG.a * xMin + REG.b }, { x: xMax, y: REG.a * xMax + REG.b }],
+      borderColor: "#e8731c", backgroundColor: "#e8731c", borderWidth: 2, pointRadius: 0 },
+  ]},
+  options: { responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: legendOpts,
+      tooltip: { callbacks: { label: ctx => ctx.raw.h === undefined
+        ? "Régression"
+        : `${ctx.raw.h}h : ${Math.round(ctx.raw.x)} MW, ${ctx.raw.y.toFixed(1)} €/MWh` } },
+    },
+    scales: axisOpts("Solaire + éolien (MW)", "Prix (€/MWh)") },
+});
+document.getElementById("regEq").textContent =
+  `prix = ${REG.a.toFixed(5)} × (solaire + éolien) + ${REG.b.toFixed(1)}   |   R² = ${REG.r2.toFixed(2)}   |   ${neg.length} heures à prix négatif`;
+
+// ---------- Mise à jour à chaque mouvement de slider ----------
+function update() {
+  const frGW = parseFloat(document.getElementById("fr").value);
+  const batMW = parseFloat(document.getElementById("bat").value);
+  const eta = parseFloat(document.getElementById("eff").value) / 100;
+  document.getElementById("frVal").textContent = frGW.toFixed(1) + " GW";
+  document.getElementById("batVal").textContent = batMW + " MW";
+  document.getElementById("effVal").textContent = Math.round(eta * 100) + " %";
+
+  const Pfr = frGW * 1000;
+  const fr = bestDispatch(basePrix, Pfr, eta);
+  const prixFR = basePrix.map((p, h) => p - A * fr.profile[h]);
+  const strat = document.getElementById("strat").value;
+  const batDispatch = (prices) => strat === "fixed"
+    ? fixedDispatch(prices, batMW, eta)
+    : bestDispatch(prices, batMW, eta);
+  const bat0 = batDispatch(basePrix);
+  const bat1 = batDispatch(prixFR);
+  const rev0 = revenue(basePrix, bat0.profile);
+  const rev1 = revenue(prixFR, bat1.profile);
+  const revFr = revenue(prixFR, fr.profile);
+  const dRev = rev1 - rev0;
+  const dPrixMax = Math.max(...prixFR.map((p, h) => p - basePrix[h]));
+
+  document.getElementById("rev0").textContent = fmtEur(rev0);
+  document.getElementById("rev1").textContent = fmtEur(rev1);
+  const dEl = document.getElementById("dRev");
+  dEl.textContent = (dRev >= 0 ? "+" : "") + fmtEur(dRev);
+  dEl.className = "v " + (dRev >= 0 ? "pos" : "neg");
+  document.getElementById("dRevPct").textContent =
+    rev0 !== 0 ? ((dRev / Math.abs(rev0)) * 100).toFixed(1) + " % vs sans parc FR" : "";
+  document.getElementById("revFr").textContent = fmtEur(revFr);
+  document.getElementById("dPrixMax").textContent = "+" + dPrixMax.toFixed(1) + " €/MWh";
+
+  cPrix.data.datasets[1].data = prixFR;
+  cPrix.update();
+  cDispatch.data.datasets[0].data = fr.profile;
+  cDispatch.data.datasets[1].data = bat1.profile;
+  cDispatch.update();
+
+  const lbl = arr => arr.map(h => h + "h").join(", ") || "—";
+  document.getElementById("planText").textContent =
+    `Parc FR : charge ${lbl(fr.charge)} — décharge ${lbl(fr.discharge)}.   ` +
+    `Batterie : charge ${lbl(bat1.charge)} — décharge ${lbl(bat1.discharge)}.`;
+}
+
+document.getElementById("fr").addEventListener("input", update);
+document.getElementById("bat").addEventListener("input", update);
+document.getElementById("eff").addEventListener("input", update);
+document.getElementById("strat").addEventListener("change", update);
+document.getElementById("theme").addEventListener("change", e => applyTheme(e.target.value));
+
+applyTheme("dark");
+update();
+</script>
+</body>
+</html>
