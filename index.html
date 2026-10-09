@@ -298,6 +298,13 @@ document.getElementById("regEq").textContent =
   `prix = ${REG.a.toFixed(5)} × (solaire + éolien) + ${REG.b.toFixed(1)}   |   R² = ${REG.r2.toFixed(2)}   |   ${neg.length} heures à prix négatif`;
 
 // ---------- Mise à jour à chaque mouvement de slider ----------
+// KPI : revenu de la seule partie charge (heures où la puissance est positive)
+function chargeRevenue(prices, profile) {
+  let r = 0;
+  for (let h = 0; h < prices.length; h++) if (profile[h] > 0) r -= prices[h] * profile[h];
+  return r;
+}
+
 function update() {
   const frGW = parseFloat(document.getElementById("fr").value);
   const batMW = parseFloat(document.getElementById("bat").value);
@@ -320,11 +327,13 @@ function update() {
     : bestDispatch(prices, batMW, eta);
   const bat0 = batDispatch(EST);
   const bat1 = batDispatch(prixFR);
-  const rev0 = revenue(EST, bat0.profile);
-  const rev1 = revenue(prixFR, bat1.profile);
-  const revFr = revenue(prixFR, fr.profile);
+  const rev0 = chargeRevenue(EST, bat0.profile);
+  const rev1 = chargeRevenue(prixFR, bat1.profile);
+  const revFr = chargeRevenue(prixFR, fr.profile);
   const dRev = rev1 - rev0;
-  const dPrixMax = Math.max(...prixFR.map((p, h) => p - EST[h]));
+  const dPrixMax = fr.charge.length
+    ? Math.max(...fr.charge.map(h => prixFR[h] - EST[h]))
+    : 0;
 
   document.getElementById("rev0").textContent = fmtEur(rev0);
   document.getElementById("rev1").textContent = fmtEur(rev1);
